@@ -1,0 +1,154 @@
+// ignore_for_file: avoid_print
+
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:encrypt/encrypt.dart' as encrypt;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mscl_engineer/Model/api_url.dart';
+
+class UserController {
+  bool isLoading = true;
+  int itemCount = 0;
+  int statusCount = 0;
+  int closedCount = 0;
+  int esclationCount = 0;
+    Map<String, int> statusCounts = {}; 
+       Map<String, int> deptCounts = {}; 
+
+  Future<void> fetchUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('authToken');
+    final userid = prefs.getString('userId');
+    try {
+      final response = await http.get(
+        Uri.parse(ApiUrl.getuserdata(userid!)),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 200) {
+        var json = jsonDecode(response.body);
+
+        final key = encrypt.Key.fromBase16('9b7bdbd41c5e1d7a1403461ba429f2073483ab82843fe8ed32dfa904e830d8c9');
+        final iv = encrypt.IV.fromBase16('33224fa12720971572d1a5677cede948');
+
+        final encrypter = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.cbc, padding: 'PKCS7'));
+
+        try {
+          final encryptedData = encrypt.Encrypted.fromBase16(json['data']);
+          final decryptedData = encrypter.decrypt(encryptedData, iv: iv);
+          final decryptedJson = jsonDecode(decryptedData);
+
+          int count;
+          if (decryptedJson is List) {
+            count = decryptedJson.length;
+          } else if (decryptedJson is Map) {
+            count = 1; // Assuming Map contains a single item
+          } else {
+            count = 1; // Assuming other cases
+          }
+
+          itemCount = count;
+          //print("item count: $itemCount");
+
+          // Initialize status counter
+          int totalCount = 0;
+
+          // Count the number of items with specific statuses
+          if (decryptedJson is List) {
+            for (var item in decryptedJson) {
+              if (item['status'] == 'processing' || 
+                  item['status'] == 'onhold' || 
+                  item['status'] == 'inprogress' || 
+                  item['status'] == 'resolved' || 
+                  item['status'] == 'closed') {
+                totalCount++;
+              }
+            }
+          } else if (decryptedJson is Map) {
+            if (decryptedJson['status'] == 'processing' || 
+                decryptedJson['status'] == 'onhold' || 
+                decryptedJson['status'] == 'inprogress' || 
+                decryptedJson['status'] == 'resolved' || 
+                decryptedJson['status'] == 'closed') {
+              totalCount = 1;
+            }
+          }
+
+          statusCount = totalCount;
+
+          int closedItemsCount = 0;
+
+          if (decryptedJson is List) {
+            for (var item in decryptedJson) {
+                String status = (item['status'] as String?)?.toLowerCase() ?? '';
+              if (status == 'closed') {
+                closedItemsCount++;
+              }
+            }
+          } else if (decryptedJson is Map) {
+              String status = (decryptedJson['status'] as String?)?.toLowerCase() ?? '';
+            if (status == 'closed') {
+              closedItemsCount = 1;
+            }
+          }
+
+          closedCount = closedItemsCount;
+          int escalationItemsCount = 0;
+
+          if (decryptedJson is List) {
+            for (var item in decryptedJson) {
+                String esacalted = (item['isEsacalted'] as String?)?.toLowerCase() ?? '';
+              if (esacalted == 'yes') {
+                escalationItemsCount++;
+              }
+            }
+          } else if (decryptedJson is Map) {
+              String status = (decryptedJson['isEsacalted'] as String?)?.toLowerCase() ?? '';
+            if (status == 'yes') {
+              escalationItemsCount = 1;
+            }
+          }
+
+          esclationCount = escalationItemsCount;
+
+
+             statusCounts = {};
+
+          // Count occurrences of each status
+          if (decryptedJson is List) {
+            for (var item in decryptedJson) {
+              String status = item['status'] ?? 'unknown';
+              statusCounts[status] = (statusCounts[status] ?? 0) + 1;
+            }
+          } else if (decryptedJson is Map) {
+            String status = decryptedJson['status'] ?? 'unknown';
+            statusCounts[status] = 1;
+          }
+
+                deptCounts = {};
+
+          // Count occurrences of each status
+          if (decryptedJson is List) {
+            for (var item in decryptedJson) {
+              String status = item['dept_name'] ?? 'unknown';
+              deptCounts[status] = (deptCounts[status] ?? 0) + 1;
+            }
+          } else if (decryptedJson is Map) {
+            String status = decryptedJson['dept_name'] ?? 'unknown';
+            deptCounts[status] = 1;
+          }
+
+          // print("closed counts: $closedCount");
+
+          // print("Status counts: $statusCounts");
+        } catch (e) {
+          print("Decryption or parsing error: $e");
+        }
+      } else {
+        print("Error fetching user data: ${response.statusCode}");
+      }
+    } catch (e) {
+      print("Request error: $e");
+    }
+  }
+}
